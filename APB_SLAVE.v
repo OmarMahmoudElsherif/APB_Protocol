@@ -25,12 +25,12 @@ input	wire	[DATA_WD-1:0]		PWDATA,
 ///////////////////// Outputs ////////////////////////////////
 
 output	reg							APB_Request,
-output	reg							PREADY,
+output	wire						PREADY,
 output	reg		[DATA_WD-1:0]		APB_ODATA,
 output	reg		[ADDR_WD-1:0]		APB_OADDR,
 output	reg		[3:0]				APB_OSTRB,
 output	reg		[DATA_WD-1:0]		PRDATA,
-output	wire	[1:0]				PSLVERR
+output	reg  	[1:0]				PSLVERR
 	
 );
 
@@ -48,9 +48,9 @@ reg		[3:0]				SLAVE_STRB_Reg;
 /////////////////////  Internal Signals  /////////////////////
 //////////////////////////////////////////////////////////////
 
-reg					PENABLE_SYNC;
-reg					PREADY_SYNC,
-
+wire				PENABLE_SYNC;
+reg					PREADY_SYNC;
+wire                PRESETn_SYNC;
 
 //////////////////////////////////////////////////////////////
 ////////////////////////  FSM States  ////////////////////////
@@ -61,7 +61,8 @@ reg		[2:0]		SETUP_PHASE		=	'b000,
 					READ_PHASE		=	'b010,
 					SEND_REQUEST	=	'b011,
 					GRANT_ACCESS	=	'b100,
-					WAIT_STAGE		=	'b101;
+					WAIT_STAGE		=	'b101,
+					TRAN_COMPLETE   =   'b110;
 					
 
 
@@ -72,42 +73,34 @@ reg		[2:0]	Next_state,
 
 
 //////////////////////////////////////////////////////////////
-///////////////////  Assign Error Signals  ///////////////////
+/////////////////////  State Transition  /////////////////////
 //////////////////////////////////////////////////////////////
 
-
-assign PSLVERR	=	{ Parity_ER , Addr_ER };
-
-
-
-//////////////////////////////////////////////////////////////
-/////////////////////  Next State Logic  /////////////////////
-//////////////////////////////////////////////////////////////
-
-always @(posedge S_CLK or negedge PRESETn) begin
-	if (!PRESETn) begin
-		Next_state	<=	WAIT_STAGE;
+always @(posedge S_CLK or negedge PRESETn_SYNC) begin
+	if (!PRESETn_SYNC) begin
+		current_state	<=	SETUP_PHASE;
 	end
 	else  begin
-		Next_state	<=	current_state;
+		current_state	<=	Next_state;
 	end
 end
 
 
 
 //////////////////////////////////////////////////////////////
-/////////////////////////  FSM Logic  ////////////////////////
+////////////////////// Next State Logic  /////////////////////
 //////////////////////////////////////////////////////////////
 
 always@(*) begin
 
 /************ initial values to avoid latches *********/
 APB_Request			=	'b0;
-PENABLE_SYNC		=	'b0;
 PREADY_SYNC			=	'b0;
 APB_OSTRB			=	'b0;
 APB_ODATA			=	'b0;
 APB_OADDR			=	'b0;
+PSLVERR				=	'b0;
+
 
 	case(current_state)
 		
@@ -115,18 +108,18 @@ APB_OADDR			=	'b0;
 			if(ConfigSp_ACKAPB=='b1 && ConfigSp_APBValid=='b0)	 begin  // Write Transaction Done
 				
 				PREADY_SYNC			=	'b1;	// Ack App to tell him write transaction done
-				Next_state			=	SETUP_PHASE;
+				Next_state			=	TRAN_COMPLETE;
 			end
 			
 			else if(ConfigSp_ACKAPB=='b1 && ConfigSp_APBValid=='b1)	 begin // Config Space sends data to APB
 	
 				/*	read data from  ConfigSp_Data to internal storage element in APB */
-				SLAVE_STRB_Reg		=	APB_OSTRB;
-				SLAVE_DATA_Reg		=	APB_ODATA;
-				SLAVE_ADDR_Reg		=	APB_OADDR;
+				SLAVE_STRB_Reg		=	'b0;
+				SLAVE_DATA_Reg		=	ConfigSp_DATA;
+				SLAVE_ADDR_Reg		=	'b0;
 
 				PREADY_SYNC			=	'b1;	// ack to app to tell him to read data from slave due to read transaction
-				Next_state			=	SETUP_PHASE;
+				Next_state			=	TRAN_COMPLETE;
 			end
 
 			else begin
@@ -134,8 +127,18 @@ APB_OADDR			=	'b0;
 			end
 		end
 
+		TRAN_COMPLETE :		begin
+			//PREADY must be high for 2 clks since PCLK < S_CLK
+			PREADY_SYNC			=	'b1;
+			//assigning error Signals
+			PSLVERR	=	{ Parity_ER , Addr_ER };
+
+			Next_state			=	SETUP_PHASE;
+		end
+
 		SETUP_PHASE	:	begin
 			if(PENABLE_SYNC	==	'b0  ) begin  // Setup Phase of APB transaction
+
 
 				/** getting PADDR  **/
 				
@@ -163,7 +166,7 @@ APB_OADDR			=	'b0;
 
 				/** getting PWDATA using Bus synchronization **/
 
-				PREADY_SYNC 	=	'b1;
+				
 				Next_state		=	SEND_REQUEST;
 			end
 			else begin
@@ -178,6 +181,10 @@ APB_OADDR			=	'b0;
 
 				/** send PRDATA using Bus synchronization to app **/
 				PREADY_SYNC 	=	'b1;
+
+				//assigning error Signals
+				PSLVERR	=	{ Parity_ER , Addr_ER };
+
 				Next_state		=	SETUP_PHASE;
 			end
 			else begin
@@ -188,9 +195,12 @@ APB_OADDR			=	'b0;
 
 		SEND_REQUEST	:	begin
 			APB_Request		=	'b1;	// generate request
-
+			
+			APB_OSTRB		=	SLAVE_STRB_Reg;
+			APB_ODATA		=	SLAVE_DATA_Reg;
+			APB_OADDR		=	SLAVE_ADDR_Reg;
 			if(APB_Grant=='b1) begin  // granted access
-				Next_state		=	GRANT_ACCESS;
+				Next_state		=	WAIT_STAGE;
 			end
 			else begin
 				Next_state		=	SEND_REQUEST;
@@ -198,23 +208,15 @@ APB_OADDR			=	'b0;
 
 		end
 
-		GRANT_ACCESS	:	begin
-			/* Send Stored data (in internal register) in APB slave to Arbiter */
-			APB_OSTRB		=	SLAVE_STRB_Reg;
-			APB_ODATA		=	SLAVE_DATA_Reg;
-			APB_OADDR		=	SLAVE_ADDR_Reg;
-
-			Next_state		=	WAIT_STAGE;
-		end
 
 		default		:	begin
 			APB_Request			=	'b0;
-			PENABLE_SYNC		=	'b0;
 			PREADY_SYNC			=	'b0;
 
 			APB_OSTRB			=	'b0;
 			APB_ODATA			=	'b0;
 			APB_OADDR			=	'b0;
+			PSLVERR				=	'b0;
 		end
 
 
@@ -223,22 +225,25 @@ APB_OADDR			=	'b0;
 end
 
 
+//////////////////////////////////////////////////////////////
+/////////////////// Internal Storage Unit  ///////////////////
+//////////////////////////////////////////////////////////////
 
-always@(posedge S_CLK,negedge PRESETn ) begin
-	if(!PRESETn) begin
+always@(posedge S_CLK,negedge PRESETn_SYNC ) begin
+	if(!PRESETn_SYNC) begin
 			SLAVE_DATA_Reg	<=	'b0;
 			SLAVE_ADDR_Reg	<=	'b0;
 			SLAVE_STRB_Reg	<=	'b0;
 			PRDATA			<=	'b0;
 	end
-	else if (PENABLE_SYNC == 'b1)
+	else if (PENABLE_SYNC == 'b1) begin
 			SLAVE_ADDR_Reg		<=	PADDR;
 			SLAVE_STRB_Reg		<=	PSTRB;
 			
 			if(current_state == WRITE_PHASE	) begin
 				SLAVE_DATA_Reg	<=	PWDATA;
 			end
-			else if(current_state==READ_PHASE)begin
+			else if(current_state==READ_PHASE) begin
 				PRDATA			<=	SLAVE_DATA_Reg;
 			end
 	end
@@ -252,7 +257,7 @@ end
 //////////////////////////////////////////////////////////////
 ///////////////////  Bit Synchronizer For PSEL  //////////////
 //////////////////////////////////////////////////////////////
-BIT_SYNC SUNC_PENABLE (
+BIT_SYNC SYNC_PENABLE (
 	.Destination_CLK(S_CLK),
 	.RST(PRESETn),
 	.ASYNC_IN(PENABLE),
@@ -263,12 +268,25 @@ BIT_SYNC SUNC_PENABLE (
 //////////////////////////////////////////////////////////////
 /////////////////  Bit Synchronizer For PREADY  //////////////
 //////////////////////////////////////////////////////////////
-BIT_SYNC SUNC_PREADY (
+BIT_SYNC SYNC_PREADY (
 	.Destination_CLK(PCLK),
 	.RST(PRESETn),
 	.ASYNC_IN(PREADY_SYNC),
 	.SYNC_OUT(PREADY)
 );
+
+
+//////////////////////////////////////////////////////////////
+/////////////////////  Reset Synchronizer  ///////////////////
+//////////////////////////////////////////////////////////////
+
+RESET_SYNC SYNC_PRESETn (
+	.Destination_CLK(S_CLK),
+	.RST(PRESETn),
+	.SYNC_RST(PRESETn_SYNC)
+	);
+
+
 
 
 
