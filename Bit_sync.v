@@ -1,18 +1,14 @@
 
 module BIT_SYNC (
-
 input		wire		Destination_CLK,
 input		wire		RST,
 input		wire		ASYNC_IN,
 output		reg			SYNC_OUT
-	
 	);
-
 //Destination FlipFlop
 reg			FF1;
 //Synchronization FlipFlop
 reg			FF2;
-
 
 //flag
 reg		Pulse_Conv_flg;
@@ -29,7 +25,6 @@ always @(posedge Destination_CLK, negedge RST) begin
 	end
 
 end
-
 
 //Pulse Converter Logic
 always@(posedge Destination_CLK, negedge RST) begin

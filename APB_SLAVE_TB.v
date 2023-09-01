@@ -18,19 +18,19 @@ parameter S_CLK_PERIOD = 10 ;	// Assume S_CLK > PCLK
 
 reg             			        PCLK_TB; 
 reg             			        S_CLK_TB; 
-reg									PRESETn_TB;
-reg									Addr_ER_TB;
-reg									Parity_ER_TB;
-reg									ConfigSp_ACKAPB_TB;
-reg									ConfigSp_APBValid_TB;
-reg			[DATA_WD_TB-1:0]		ConfigSp_DATA_TB;
-reg									APB_Grant_TB;
-reg			[3:0]					PSTRB_TB;
-reg									PWRITE_TB;
-reg									PENABLE_TB;
-reg									PSEL_TB;
-reg			[ADDR_WD_TB-1:0]		PADDR_TB;
-reg			[DATA_WD_TB-1:0]		PWDATA_TB;
+reg														PRESETn_TB;
+reg														Addr_ER_TB;
+reg														Parity_ER_TB;
+reg														ConfigSp_ACKAPB_TB;
+
+reg			[DATA_WD_TB-1:0]			ConfigSp_DATA_TB;
+reg														APB_Grant_TB;
+reg			[3:0]									PSTRB_TB;
+reg														PWRITE_TB;
+reg														PENABLE_TB;
+reg														PSEL_TB;
+reg			[ADDR_WD_TB-1:0]			PADDR_TB;
+reg			[DATA_WD_TB-1:0]			PWDATA_TB;
 
 
 wire								APB_Request_TB;
@@ -85,23 +85,21 @@ end
 
 task initialize ;
   begin
-	PCLK_TB					= 	1'b0;
-	S_CLK_TB				= 	1'b0;
-	PRESETn_TB				= 	1'b1;    // rst is deactivated
-	Addr_ER_TB				= 	1'b0;	
-	Parity_ER_TB			= 	1'b0;
-	ConfigSp_ACKAPB_TB		=	1'b0;
-	ConfigSp_APBValid_TB	=	1'b0;
-	ConfigSp_DATA_TB		=	'b0;
-	PWRITE_TB				=	'b0;
-	PENABLE_TB				=	'b0;
-	PSEL_TB					=	'b0;
-	PADDR_TB                =   'b0;
-	APB_Grant_TB			=	'b0;
-	PWDATA_TB				=	'b0;
+	PCLK_TB								= 	 'b0;
+	S_CLK_TB							= 	 'b0;
+	PRESETn_TB						= 	 'b1;    // rst is deactivated
+	Addr_ER_TB						= 	 'b0;	
+	Parity_ER_TB					= 	 'b0;
+	ConfigSp_ACKAPB_TB		=		 'b0;
+	ConfigSp_DATA_TB			=		 'b0;
+	PWRITE_TB							=	 	 'b0;
+	PENABLE_TB						=		 'b0;
+	PSEL_TB								=		 'b0;
+	PADDR_TB              =    'b0;
+	APB_Grant_TB					=		 'b0;
+	PWDATA_TB							=		 'b0;
 
-
-	App_Data_reg			=   'b0;
+	App_Data_reg					=    'b0;
 
 	
   end
@@ -136,8 +134,12 @@ task send_write_transaction ;
 		PSTRB_TB    =   STRB_in;
 		#PCLK_PERIOD;
 		
-		PENABLE_TB	=	'b1;
 		
+
+		PENABLE_TB	=	'b1;
+		#PCLK_PERIOD;
+		PENABLE_TB	=	'b0;
+
 		// Grant Access to APB
 		#(3*PCLK_PERIOD);
 		APB_Grant_TB			=	'b1;
@@ -178,9 +180,13 @@ task send_read_transaction ;
 		PADDR_TB    =   Addr_in;
 		PSTRB_TB    =   STRB_in;
 		#PCLK_PERIOD;
+
+		
 		
 		PENABLE_TB	=	'b1;
-		
+		#PCLK_PERIOD;
+		PENABLE_TB	=	'b0;
+
 		// Grant Access to APB
 		#(3*PCLK_PERIOD);
 		APB_Grant_TB			=	'b1;
@@ -191,33 +197,22 @@ task send_read_transaction ;
 		// Ack from Configuration Space (Transaction Done)
 		#(2*PCLK_PERIOD);
 		ConfigSp_ACKAPB_TB		=	1'b1;
-		ConfigSp_APBValid_TB	=	1'b1;
+
 
 		// Configuration Space Sends Data to APB
-		ConfigSp_DATA_TB		=	'd150;
+		ConfigSp_DATA_TB			=	'd150;
 
 		#(PCLK_PERIOD);
 
 		ConfigSp_ACKAPB_TB		=	1'b0;
-		ConfigSp_APBValid_TB	=	1'b0;
-		APB_Grant_TB			=	'b0;
+		APB_Grant_TB					=	'b0;
 
 		@(posedge PREADY_TB);
-		PSEL_TB		=	'b0;
-		PENABLE_TB	=	'b0;
+		PSEL_TB								=	'b0;
+		PENABLE_TB						=	'b0;
 		$display ("Read Transfer Transaction Completed\n");
 		
-
-		//App Reads Data from APB Slave
-		PWRITE_TB	=	'b0;
-		PSEL_TB		=	'b1;
-		PENABLE_TB	=	'b0;
-
-		#PCLK_PERIOD;
-
-		PENABLE_TB	=	'b1;
-		#(2*PCLK_PERIOD);
-		App_Data_reg	=	PRDATA_TB;
+		App_Data_reg					=	PRDATA_TB;
 		$display ("Data Read From APB is : %d \n",App_Data_reg);
 		#(2*PCLK_PERIOD)
 		initialize();
@@ -253,7 +248,6 @@ APB_SLAVE #(
 		.Addr_ER(Addr_ER_TB),
 		.Parity_ER(Parity_ER_TB),
 		.ConfigSp_ACKAPB(ConfigSp_ACKAPB_TB),
-		.ConfigSp_APBValid(ConfigSp_APBValid_TB),
 		.ConfigSp_DATA(ConfigSp_DATA_TB),
 		.APB_Grant(APB_Grant_TB),
 		.PSTRB(PSTRB_TB),

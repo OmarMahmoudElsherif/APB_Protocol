@@ -11,7 +11,6 @@ input	wire						PRESETn,
 input	wire						Addr_ER,
 input	wire						Parity_ER,
 input	wire						ConfigSp_ACKAPB,
-input	wire						ConfigSp_APBValid,
 input	wire	[DATA_WD-1:0]		ConfigSp_DATA,
 input	wire						APB_Grant,
 input	wire	[3:0]				PSTRB,
@@ -51,6 +50,8 @@ reg		[3:0]				SLAVE_STRB_Reg;
 wire				PENABLE_SYNC;
 reg					PREADY_SYNC;
 wire                PRESETn_SYNC;
+reg                 ConfigSp_Read_Valid;
+
 
 //////////////////////////////////////////////////////////////
 ////////////////////////  FSM States  ////////////////////////
@@ -60,9 +61,8 @@ reg		[2:0]		SETUP_PHASE		=	'b000,
 					WRITE_PHASE		=	'b001,
 					READ_PHASE		=	'b010,
 					SEND_REQUEST	=	'b011,
-					GRANT_ACCESS	=	'b100,
-					WAIT_STAGE		=	'b101,
-					TRAN_COMPLETE   =   'b110;
+					WAIT_STAGE		=	'b100,
+					TRAN_COMPLETE   =   'b101;
 					
 
 
@@ -99,25 +99,21 @@ PREADY_SYNC			=	'b0;
 APB_OSTRB			=	'b0;
 APB_ODATA			=	'b0;
 APB_OADDR			=	'b0;
-PSLVERR				=	'b0;
 
 
 	case(current_state)
 		
 		WAIT_STAGE	:	begin
-			if(ConfigSp_ACKAPB=='b1 && ConfigSp_APBValid=='b0)	 begin  // Write Transaction Done
+			if(ConfigSp_ACKAPB=='b1 && ConfigSp_Read_Valid=='b0)	 begin  // Write Transaction Done
 				
 				PREADY_SYNC			=	'b1;	// Ack App to tell him write transaction done
 				Next_state			=	TRAN_COMPLETE;
 			end
 			
-			else if(ConfigSp_ACKAPB=='b1 && ConfigSp_APBValid=='b1)	 begin // Config Space sends data to APB
+			else if(ConfigSp_ACKAPB=='b1 && ConfigSp_Read_Valid=='b1)	 begin // Config Space sends data to APB
 	
 				/*	read data from  ConfigSp_Data to internal storage element in APB */
-				SLAVE_STRB_Reg		=	'b0;
-				SLAVE_DATA_Reg		=	ConfigSp_DATA;
-				SLAVE_ADDR_Reg		=	'b0;
-
+				
 				PREADY_SYNC			=	'b1;	// ack to app to tell him to read data from slave due to read transaction
 				Next_state			=	TRAN_COMPLETE;
 			end
@@ -128,11 +124,10 @@ PSLVERR				=	'b0;
 		end
 
 		TRAN_COMPLETE :		begin
-			//PREADY must be high for 2 clks since PCLK < S_CLK
+			//PREADY must be high for 2 clks since usually PCLK < S_CLK
 			PREADY_SYNC			=	'b1;
-			//assigning error Signals
-			PSLVERR	=	{ Parity_ER , Addr_ER };
-
+			
+		
 			Next_state			=	SETUP_PHASE;
 		end
 
@@ -179,13 +174,10 @@ PSLVERR				=	'b0;
 		READ_PHASE	:	begin
 			if(PENABLE_SYNC	==	'b1) begin   	// Data Access Phase of APB transaction
 
-				/** send PRDATA using Bus synchronization to app **/
+			
 				PREADY_SYNC 	=	'b1;
 
-				//assigning error Signals
-				PSLVERR	=	{ Parity_ER , Addr_ER };
-
-				Next_state		=	SETUP_PHASE;
+				Next_state		=	TRAN_COMPLETE;
 			end
 			else begin
 				Next_state		=	READ_PHASE;
@@ -216,7 +208,7 @@ PSLVERR				=	'b0;
 			APB_OSTRB			=	'b0;
 			APB_ODATA			=	'b0;
 			APB_OADDR			=	'b0;
-			PSLVERR				=	'b0;
+		
 		end
 
 
@@ -231,21 +223,37 @@ end
 
 always@(posedge S_CLK,negedge PRESETn_SYNC ) begin
 	if(!PRESETn_SYNC) begin
-			SLAVE_DATA_Reg	<=	'b0;
-			SLAVE_ADDR_Reg	<=	'b0;
-			SLAVE_STRB_Reg	<=	'b0;
-			PRDATA			<=	'b0;
-	end
-	else if (PENABLE_SYNC == 'b1) begin
-			SLAVE_ADDR_Reg		<=	PADDR;
-			SLAVE_STRB_Reg		<=	PSTRB;
+			SLAVE_DATA_Reg			<=	'b0;
+			SLAVE_ADDR_Reg			<=	'b0;
+			SLAVE_STRB_Reg			<=	'b0;
+			ConfigSp_Read_Valid		<=	'b0;
+			PRDATA      			<=	'b0;
+			PSLVERR					<=	'b0;
 			
-			if(current_state == WRITE_PHASE	) begin
-				SLAVE_DATA_Reg	<=	PWDATA;
+	end
+	else begin
+
+			if (current_state == WRITE_PHASE && PENABLE_SYNC	==	'b1) begin
+				SLAVE_ADDR_Reg		<=	PADDR;
+				SLAVE_DATA_Reg		<=	PWDATA;
+				SLAVE_STRB_Reg		<=	PSTRB;
+				ConfigSp_Read_Valid	<=	~|PSTRB;		//  if Read Transaction, Strobes = 'b0000, so ConfigSp_Read_Valid = 1,
+													//	if Write Transacation , ConfigSp_Read_Valid = 0
+
 			end
-			else if(current_state==READ_PHASE) begin
-				PRDATA			<=	SLAVE_DATA_Reg;
+
+			// Config Space sends data to APB
+			else if(current_state == WAIT_STAGE && ConfigSp_ACKAPB=='b1 && ConfigSp_Read_Valid=='b1) begin 
+				/*	read data from  ConfigSp_Data to internal storage element in APB */
+				SLAVE_DATA_Reg		<=	ConfigSp_DATA;
 			end
+
+			else if (current_state == TRAN_COMPLETE) begin
+				PRDATA				<=	SLAVE_DATA_Reg;
+				//assigning error Signals
+				PSLVERR				<=	{ Parity_ER , Addr_ER };
+			end
+			
 	end
 
 
