@@ -28,8 +28,8 @@ output	wire						PREADY,
 output	reg		[DATA_WD-1:0]		APB_ODATA,
 output	reg		[ADDR_WD-1:0]		APB_OADDR,
 output	reg		[3:0]				APB_OSTRB,
-output	reg		[DATA_WD-1:0]		PRDATA,
-output	reg  	[1:0]				PSLVERR
+output	wire	[DATA_WD-1:0]		PRDATA,
+output	wire  	[1:0]				PSLVERR
 	
 );
 
@@ -227,8 +227,6 @@ always@(posedge S_CLK,negedge PRESETn_SYNC ) begin
 			SLAVE_ADDR_Reg			<=	'b0;
 			SLAVE_STRB_Reg			<=	'b0;
 			ConfigSp_Read_Valid		<=	'b0;
-			PRDATA      			<=	'b0;
-			PSLVERR					<=	'b0;
 			
 	end
 	else begin
@@ -248,18 +246,21 @@ always@(posedge S_CLK,negedge PRESETn_SYNC ) begin
 				SLAVE_DATA_Reg		<=	ConfigSp_DATA;
 			end
 
-			else if (current_state == TRAN_COMPLETE) begin
-				PRDATA				<=	SLAVE_DATA_Reg;
-				//assigning error Signals
-				PSLVERR				<=	{ Parity_ER , Addr_ER };
-			end
-			
+
 	end
 
 
 end
 
 
+//////////////////////////////////////////////////////////////
+/////////////////// Assign PRDATA and PSLVERR ////////////////
+//////////////////////////////////////////////////////////////
+
+//output PRDATA,PSLVERR on PREADY edge {on PCLK edge}
+
+assign  PRDATA	= (PREADY== 'b1)	?	SLAVE_DATA_Reg		:	'b0 ;
+assign  PSLVERR	= (PREADY== 'b1)	?   {Parity_ER,Addr_ER}	:	'b0 ;
 
 
 //////////////////////////////////////////////////////////////
